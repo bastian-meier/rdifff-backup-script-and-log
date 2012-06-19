@@ -1,0 +1,114 @@
+#!/bin/bash
+
+
+# meine .ssh/config:
+# host backup-server
+# hostname HOSTNAME
+# port 22
+# user USERNAME
+# identityfile /root/.ssh/id_rsa
+# compression yes
+# cipher blowfish
+# protocol 2
+
+
+echo "--------------------"
+date
+echo "--------------------"
+echo "versuche auf dem backup-rechner die backup.log zu loeschen"
+i=1
+while [ $i -le 5 ]
+do
+ # mal schauen ob der backup-rechner online ist
+ # wenn er online ist wird gleich das alte log file geloescht
+ if ssh backup-server "rm /backup/rdiff-backup-data/backup.log"
+  then
+    echo "loeschen erfolgreich, rechner ist online"
+    # der backup rechner ist online
+
+    # log eintrag backup gestartet
+    wget --quiet --output-document /dev/null http://xyz.de/log.php?e=0Backup_gestartet
+
+    # das backup wird gestartet 
+    rdiff-backup -v 3 --print-statistics --exclude /tmp --exclude /proc --exclude /dev --exclude /backup --exclude /sys --exclude /var/log --exclude /var/lib/mysql --exclude /var/spool --exclude-special-files / backup-server::/backup
+    # log eintrag backup beendet
+    wget --quiet --output-document /dev/null http://xyz.de/log.php?e=0Backup_beendet
+
+    # auf dem bacup rechner wird die festplattenauslastung zum rdiff log hinzugefuegt
+    ssh backup-server "echo -------[ Festplatten Ausl. Backup-server  ]-------- >> /backup/rdiff-backup-data/backup.log"
+    ssh backup-server "df -lh >> /backup/rdiff-backup-data/backup.log"
+
+    # log eintrag festplattenlog hinzugefuegt
+    wget --quiet --output-document /dev/null http://xyz.de/log.php?e=0Festplatten_log_hinzugefuegt
+
+    echo "kopiere log vom backup-rechner"
+    # die rdiff-backup logdatei wird auf luna550 kopiert
+    scp backup-server:/backup/rdiff-backup-data/backup.log /var/www/rdiff-backup.log
+
+    # log eintrag log kopiert
+    wget --quiet --output-document /dev/null http://xyz.de/log.php?e=0log_kopiert
+
+    echo "der backup rechner wird heruntergefahren"
+    # auf dem backup rechner wird das script shutdown ausgefuehrt, dieses setzt eine neue aufwachzeit und faehrt
+    # den rechner herunter
+    sleep 1 && wget --quiet --output-document /dev/null http://xyz.de/log.php?e=0sende_shutdown_befehl
+    sleep 1 && ssh backup-server "/home/backup-user/shutdown"
+    
+    # $i auf 10 setzen um aus der schleife zu springen
+    i=10
+  else # der backup rechner ist leider nicht online :-(
+
+    # zaehler um eins erhoehen
+    i=`expr $i + 1`
+    echo "rechner ist offline"
+    echo "warte 5 min ..."
+
+    # log eintrag backup rechner offline
+    wget --quiet --output-document /dev/null http://xyz.de/log.php?e=0Backup_rechner_offline;
+
+    # log eintrag warte 5 min
+    wget --quiet --output-document /dev/null http://xyz.de/log.php?e=0warte_5_min
+    sleep 300
+
+ fi
+
+done
+if [ $i -lt 10 ]
+ then   
+   
+    # ein leeres log wird kopiert mit dem hinweis dass der rechner offline ist
+    cp /root/.rdiff-backup.log /var/www/rdiff-backup.log
+
+    # log eintrag backup rechner offline
+    wget --quiet --output-document /dev/null http://xyz.de/log.php?e=0Backup_rechner_offline;
+
+    # log eintrag backup abgebrochen
+    wget --quiet --output-document /dev/null http://xyz.de/log.php?e=0Backup_abgebrochen
+
+    # log muss von log.php geparst werden
+    wget --quiet --output-document /dev/null http://xyz.de/log.php?e=0log_kopiert
+fi
+
+
+# log eintrag lokales backup gestartet
+wget --quiet --output-document /dev/null http://xyz.de/log.php?e=0lokales_Backup_gestartet
+
+# das backup wird gestartet
+rdiff-backup -v 3 --print-statistics --exclude /tmp --exclude /proc --exclude /dev --exclude /backup --exclude /sys --exclude /var/log --exclude /var/lib/mysql --exclude /var/spool --exclude-special-files / /backup/rdiff-backup/
+
+# log eintrag lokales backup beendet
+wget --quiet --output-document /dev/null http://xyz.de/log.php?e=0lokales_Backup_beendet
+
+# log eintrag um hd auslastung erweitern
+echo ' ' >> /var/www/rdiff-backup.log
+echo '----------------[ Festplatten Ausl. luna550 ]-----------------' >> /var/www/rdiff-backup.log
+df -lh >> /var/www/rdiff-backup.log
+
+# dem log wird der last login status von luna 550 hinzugefuegt
+echo ' ' >> /var/www/rdiff-backup.log
+echo '-----------------[ letzte logins auf luna550 ]-----------------' >> /var/www/rdiff-backup.log
+sleep 1 && last -i -n 10 | awk '$1 !~/wtmp/ && $1 > 0' >> /var/www/rdiff-backup.log
+
+# log eintrag log erweiter
+wget --quiet --output-document /dev/null http://xyz.de/log.php?e=0log_erweitert
+
